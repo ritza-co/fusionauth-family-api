@@ -2,14 +2,14 @@ const express = require('express');
 const router = express.Router();
 const pkceChallenge = require('pkce-challenge').default;
 const {FusionAuthClient} = require('@fusionauth/typescript-client');
-const clientId = '7d31ada6-27b4-461e-bf8a-f642aacf5775';
-const clientSecret = 'yz-hU1HZRZzAml2YJdM7-Dtafksq2-lm6sEFxAPS_6g';
-const client = new FusionAuthClient('FKfzkcn2tVitDR97V62zoyVVay5d07icXamrmda8VLCxQYD3E6MaL25Y', 'https://fusionauth.ritza.co');
-const consentId = 'e5e81271-847b-467e-b172-770fa806f894';
+const clientId = '<YOUR_CLIENT_ID>';
+const clientSecret = '<YOUR_CLIENT_SECRET>';
+const client = new FusionAuthClient('<YOUR_API_KEY', '<YOUR_FUSIONAUTH_URL>');
+const consentId = '<YOUR_CONSENT_ID>';
 
 
 /* GET home page. */
-router.get('/', function (req, res, next) {
+router.get('/', function(req, res, next) {
     let family = [];
     //generate the pkce challenge/verifier dict
     pkce_pair = pkceChallenge();
@@ -23,6 +23,8 @@ router.get('/', function (req, res, next) {
                 if (response.response.families && response.response.families.length >= 1) {
                     // adults can only belong to one family
                     let children = response.response.families[0].members.filter(elem => elem.role != 'Adult');
+                    //include current user in children list
+                    children = children.concat(response.response.families[0].members.filter(elem => elem.userId == req.session.user.id))
                     let getUsers = children.map(elem => {
                         return client.retrieveUser(elem.userId);
                     });
@@ -59,6 +61,9 @@ router.get('/', function (req, res, next) {
                             title: 'Family Example',
                             challenge: pkce_pair['code_challenge']
                         });
+                    }).catch((err) => {
+                      console.log("in error");
+                      console.error(JSON.stringify(err))
                     });
                 } else {
                     res.render('index', {family: family, user: req.session.user, title: 'Family Example', challenge: pkce_pair['code_challenge']});
@@ -75,10 +80,7 @@ router.get('/', function (req, res, next) {
 /* OAuth return from FusionAuth */
 router.get('/oauth-redirect', function (req, res, next) {
     // This code stores the user in a server-side session
-    //client.exchangeOAuthCodeForAccessToken(
-    client.exchangeOAuthCodeForAccessTokenUsingPKCE(
-
-    req.query.code,
+    client.exchangeOAuthCodeForAccessTokenUsingPKCE(req.query.code,
         clientId,
         clientSecret,
         'http://localhost:3000/oauth-redirect',
@@ -104,85 +106,13 @@ router.get('/oauth-redirect', function (req, res, next) {
 
 });
 
-/* Confirm child list flow */
-router.get('/confirm-child-list', function (req, res, next) {
-    if (!req.session.user) {
-        // force signin
-        res.redirect(302, '/');
-    }
-    client.retrievePendingChildren(req.session.user.email)
-        .then((response) => {
-            res.render('confirmchildren', {children: response.response.users, title: 'Confirm Your Children', challenge: req.session.challenge});
-        }).catch((err) => {
-        console.log("in error");
-        console.error(JSON.stringify(err));
-    });
-});
-
-/* Confirm child action */
-router.post('/confirm-child', function (req, res, next) {
-    if (!req.session.user) {
-        // force signin
-        res.redirect(302, '/');
-    }
-    childEmail = req.body.child;
-
-    if (!childEmail) {
-        console.log("No child email provided!");
-        res.redirect(302, '/');
-    }
-
-    let childUserId = undefined;
-    client.retrieveUserByEmail(childEmail)
-        .then((response) => {
-            childUserId = response.response.user.id;
-            return client.retrieveFamilies(req.session.user.id)
-        })
-        .then((response) => {
-            if (response && response.response && response.response.families && response.response.families.length >= 1) {
-                // user is already in family
-                return response;
-            }
-            // if no families, create one for them
-            const familyRequest = {"familyMember": {"userId": req.session.user.id, "owner": true, "role": "Adult"}};
-            return client.createFamily(null, familyRequest);
-        })
-        .then((response) => {
-            //only expect one
-            const familyId = response.response.families[0].id;
-            const familyRequest = {"familyMember": {"userId": childUserId, "role": "Child"}}
-            return client.addUserToFamily(familyId, familyRequest);
-        })
-        .then((response) => {
-            // capture consent
-            const consentRequest = {
-                "userConsent": {
-                    "userId": childUserId,
-                    "consentId": consentId,
-                    "giverUserId": req.session.user.id
-                }
-            }
-            return client.createUserConsent(null, consentRequest);
-        })
-        .then((response) => {
-            // now pull existing children to be confirmed
-            client.retrievePendingChildren(req.session.user.email)
-        })
-        .then((response) => {
-            res.redirect(302, '/confirm-child-list');
-        }).catch((err) => {
-        console.log("in error");
-        console.error(JSON.stringify(err));
-    });
-});
-
 /* Change consent */
 router.post('/change-consent-status', function (req, res, next) {
     if (!req.session.user) {
         // force signin
         res.redirect(302, '/');
     }
-
+    console.log("req body",req.body)
     const userConsentId = req.body.userConsentId;
     let desiredStatus = req.body.desiredStatus;
     if (desiredStatus != 'Active') {
